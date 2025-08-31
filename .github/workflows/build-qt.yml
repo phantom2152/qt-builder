@@ -1,0 +1,92 @@
+# .github/workflows/build-qt.yml
+name: Build Qt for macOS
+
+on:
+  workflow_dispatch:  # Only manually trigger
+
+jobs:
+  build-qt:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+    
+    - name: Install dependencies
+      run: |
+        brew install ninja cmake
+    
+    - name: Cache Qt source
+      uses: actions/cache@v3
+      id: cache-qt-source
+      with:
+        path: qt-everywhere-src-6.9.2.tar.xz
+        key: qt-source-6.9.2
+    
+    - name: Download Qt source
+      if: steps.cache-qt-source.outputs.cache-hit != 'true'
+      run: |
+        wget https://download.qt.io/official_releases/qt/6.9/6.9.2/single/qt-everywhere-src-6.9.2.tar.xz
+    
+    - name: Extract Qt source
+      run: |
+        tar -xf qt-everywhere-src-6.9.2.tar.xz
+    
+    - name: Cache Qt build
+      uses: actions/cache@v3
+      id: cache-qt-build
+      with:
+        path: qt-build
+        key: qt-build-macos-6.9.2-${{ runner.os }}-${{ hashFiles('qt-everywhere-src-6.9.2/configure') }}
+    
+    - name: Configure Qt
+      if: steps.cache-qt-build.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p qt-build
+        cd qt-build
+        ../qt-everywhere-src-6.9.2/configure \
+          -prefix ../qt-install \
+          -opensource \
+          -confirm-license \
+          -nomake examples \
+          -nomake tests \
+          -static \
+          -release \
+          -skip qtwebengine \
+          -skip qt3d \
+          -skip qtquick3dphysics
+    
+    - name: Build Qt
+      if: steps.cache-qt-build.outputs.cache-hit != 'true'
+      run: |
+        cd qt-build
+        make -j$(sysctl -n hw.ncpu)
+        make install
+    
+    - name: Create tarball
+      run: |
+        tar -czf qt-6.9.2-macos.tar.gz -C qt-install .
+    
+    - name: Upload Qt build artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: qt-6.9.2-macos
+        path: qt-6.9.2-macos.tar.gz
+        retention-days: 90
+    
+    - name: Create release (optional)
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: qt-6.9.2-macos
+        name: Qt 6.9.2 for macOS
+        files: qt-6.9.2-macos.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
