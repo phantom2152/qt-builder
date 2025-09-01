@@ -336,7 +336,7 @@ EOF
           **Build Configuration:** ${{ env.BUILD_TYPE }}  
           **Architecture:** ARM64 (Apple Silicon)  
           **Platform:** macOS 14+  
-          **Built on:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Built on:** GitHub Actions
           
           ## 🚀 Quick Start
           
