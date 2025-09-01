@@ -1,101 +1,260 @@
-name: Build Qt 6.8.1 macOS ARM64
+name: Build Qt for macOS ARM64
 
 on:
   workflow_dispatch:
     inputs:
+      qt_version:
+        description: 'Qt version to build'
+        required: true
+        default: '6.9.2'
+        type: string
       build_type:
         description: 'Build type'
         required: true
-        default: 'Release'
+        default: 'release'
         type: choice
         options:
-        - Release
-        - Debug
-
-env:
-  QT_VERSION: "6.8.1"
+          - release
+          - debug
+          - debug-and-release
 
 jobs:
   build-qt:
-    runs-on: macos-14
-    timeout-minutes: 360
+    runs-on: macos-14  # macOS ARM64 runner
+    timeout-minutes: 480  # 8 hours timeout
     
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up environment variables
+      run: |
+        echo "QT_VERSION=${{ github.event.inputs.qt_version }}" >> $GITHUB_ENV
+        echo "BUILD_TYPE=${{ github.event.inputs.build_type }}" >> $GITHUB_ENV
+        echo "QT_INSTALL_DIR=$HOME/qt-install" >> $GITHUB_ENV
+        echo "QT_SOURCE_DIR=$HOME/qt-source" >> $GITHUB_ENV
+        echo "QT_BUILD_DIR=$HOME/qt-build" >> $GITHUB_ENV
+    
     - name: Install dependencies
       run: |
-        brew install ninja cmake openssl@3 icu4c
-        echo "PATH=/opt/homebrew/bin:$PATH" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig" >> $GITHUB_ENV
-    
-    - name: Cache Qt source
-      uses: actions/cache@v4
-      id: cache-source
-      with:
-        path: qt-src
-        key: qt-source-${{ env.QT_VERSION }}
+        # Update Homebrew and install required packages
+        brew update
+        brew install cmake ninja python@3.11 perl node pkg-config
+        
+        # Ensure Xcode command line tools are installed
+        sudo xcode-select --install || true
+        
+        # Set up Python path
+        echo "/opt/homebrew/bin" >> $GITHUB_PATH
+        echo "/opt/homebrew/opt/python@3.11/bin" >> $GITHUB_PATH
     
     - name: Download Qt source
-      if: steps.cache-source.outputs.cache-hit != 'true'
       run: |
-        curl -L -o qt.tar.xz https://download.qt.io/official_releases/qt/6.8/${{ env.QT_VERSION }}/single/qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz
-        tar -xf qt.tar.xz
-        mv qt-everywhere-src-${{ env.QT_VERSION }} qt-src
+        mkdir -p $QT_SOURCE_DIR
+        cd $QT_SOURCE_DIR
+        
+        # Download Qt source from official repository
+        curl -L "https://download.qt.io/official_releases/qt/${QT_VERSION%.*}/$QT_VERSION/single/qt-everywhere-src-$QT_VERSION.tar.xz" -o qt-source.tar.xz
+        
+        # Verify download
+        ls -la qt-source.tar.xz
+        
+        # Extract source
+        tar -xf qt-source.tar.xz --strip-components=1
+        rm qt-source.tar.xz
+        
+        # Show extracted contents
+        ls -la
     
-    - name: Cache Qt build
-      uses: actions/cache@v4
-      id: cache-build
-      with:
-        path: qt-install
-        key: qt-build-${{ env.QT_VERSION }}-${{ inputs.build_type }}-${{ hashFiles('qt-src/configure.cmake') }}
+    - name: Configure Qt build
+      run: |
+        mkdir -p $QT_BUILD_DIR
+        cd $QT_BUILD_DIR
+        
+        # Configure Qt with optimized settings for ARM64 macOS
+        $QT_SOURCE_DIR/configure \
+          -prefix $QT_INSTALL_DIR \
+          -$BUILD_TYPE \
+          -shared \
+          -opensource \
+          -confirm-license \
+          -nomake examples \
+          -nomake tests \
+          -no-feature-assistant \
+          -no-feature-designer \
+          -no-feature-linguist \
+          -no-feature-pixeltool \
+          -no-feature-qtattributionsscanner \
+          -no-feature-qtdiag \
+          -no-feature-qtplugininfo \
+          -qt-zlib \
+          -qt-libpng \
+          -qt-libjpeg \
+          -qt-freetype \
+          -qt-harfbuzz \
+          -qt-pcre \
+          -openssl-linked \
+          -system-proxies \
+          -feature-relocatable \
+          -- \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_BUILD_TYPE=Release
     
     - name: Build Qt
-      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
-        mkdir -p qt-build qt-install
-        cd qt-build
+        cd $QT_BUILD_DIR
         
-        cmake ../qt-src \
-          -GNinja \
-          -DCMAKE_INSTALL_PREFIX=../qt-install \
-          -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
-          -DCMAKE_OSX_ARCHITECTURES=arm64 \
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-          -DCMAKE_PREFIX_PATH=/opt/homebrew \
-          -DQT_BUILD_EXAMPLES=OFF \
-          -DQT_BUILD_TESTS=OFF \
-          -DQT_FEATURE_webengine=OFF \
-          -DQT_FEATURE_webenginecore=OFF \
-          -DQT_FEATURE_webenginewidgets=OFF \
-          -DOpenSSL_ROOT_DIR=/opt/homebrew/opt/openssl@3 \
-          -DICU_ROOT_DIR=/opt/homebrew/opt/icu4c
+        # Get number of CPU cores for parallel build
+        CORES=$(sysctl -n hw.ncpu)
+        echo "Building with $CORES parallel jobs"
         
-        ninja -j$(sysctl -n hw.ncpu)
-        ninja install
+        # Build Qt using CMake
+        cmake --build . --parallel $CORES
     
-    - name: Create package
+    - name: Install Qt
       run: |
-        cd qt-install
+        cd $QT_BUILD_DIR
+        cmake --install .
+    
+    - name: Verify installation
+      run: |
+        echo "=== Qt Installation Directory ==="
+        ls -la $QT_INSTALL_DIR
         
-        # Create simple setup script
-        cat > setup.sh << 'EOF'
-        #!/bin/bash
-        export QT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        export PATH="$QT_DIR/bin:$PATH"
-        export CMAKE_PREFIX_PATH="$QT_DIR"
+        echo "=== Qt Version Check ==="
+        $QT_INSTALL_DIR/bin/qmake -version
+        
+        echo "=== Binary Architecture Check ==="
+        file $QT_INSTALL_DIR/bin/qmake
+        lipo -info $QT_INSTALL_DIR/bin/qmake
+        
+        echo "=== Library Check ==="
+        ls -la $QT_INSTALL_DIR/lib/ | head -10
+        
+        echo "=== Include Headers Check ==="
+        ls -la $QT_INSTALL_DIR/include/ | head -10
+    
+    - name: Create distribution package
+      run: |
+        cd $HOME
+        
+        # Create package directory
+        PACKAGE_NAME="qt-$QT_VERSION-macos-arm64-$BUILD_TYPE"
+        mkdir -p $PACKAGE_NAME
+        
+        # Copy Qt installation
+        cp -R $QT_INSTALL_DIR/* $PACKAGE_NAME/
+        
+        # Create version and build info
+        cat > $PACKAGE_NAME/BUILD_INFO.txt << EOF
+        Qt Version: $QT_VERSION
+        Platform: macOS ARM64
+        Build Type: $BUILD_TYPE
+        Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        Build Host: $(uname -a)
+        Xcode Version: $(xcodebuild -version | head -1)
+        CMake Version: $(cmake --version | head -1)
+        
+        Installation Instructions:
+        1. Extract this archive to your desired location
+        2. Add the bin directory to your PATH:
+           export PATH="/path/to/qt/bin:\$PATH"
+        3. Set QTDIR environment variable:
+           export QTDIR="/path/to/qt"
+        4. For CMake projects, set CMAKE_PREFIX_PATH:
+           export CMAKE_PREFIX_PATH="/path/to/qt:\$CMAKE_PREFIX_PATH"
+        
+        Verification:
+        qmake -version
+        
+        Example CMakeLists.txt:
+        find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+        qt_standard_project_setup()
+        qt_add_executable(myapp main.cpp)
+        target_link_libraries(myapp Qt6::Widgets)
         EOF
-        chmod +x setup.sh
         
-        # Strip debug symbols for release builds
-        if [[ "${{ inputs.build_type }}" == "Release" ]]; then
-          find ./lib -name "*.dylib" -exec strip -x {} \; 2>/dev/null || true
-        fi
+        # Create compressed archive
+        tar -czf $PACKAGE_NAME.tar.gz $PACKAGE_NAME/
         
-        cd ..
-        tar -czf qt-${{ env.QT_VERSION }}-macos-arm64.tar.gz -C qt-install .
+        # Generate checksums
+        shasum -a 256 $PACKAGE_NAME.tar.gz > $PACKAGE_NAME.tar.gz.sha256
+        
+        # Show package info
+        echo "=== Package Information ==="
+        ls -lh $PACKAGE_NAME.tar.gz
+        cat $PACKAGE_NAME.tar.gz.sha256
+        
+        # Show package contents summary
+        echo "=== Package Contents Summary ==="
+        tar -tzf $PACKAGE_NAME.tar.gz | head -20
+        echo "... (and more files)"
     
-    - name: Upload artifact
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: qt-${{ env.QT_VERSION }}-macos-arm64-${{ inputs.build_type }}
-        path: qt-${{ env.QT_VERSION }}-macos-arm64.tar.gz
+        name: qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}
+        path: |
+          /Users/runner/qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}.tar.gz
+          /Users/runner/qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}.tar.gz.sha256
         retention-days: 30
+        compression-level: 0  # Already compressed
+    
+    - name: Create Release (if tagged)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          /Users/runner/qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}.tar.gz
+          /Users/runner/qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}.tar.gz.sha256
+        name: Qt ${{ env.QT_VERSION }} for macOS ARM64 (${{ env.BUILD_TYPE }})
+        body: |
+          # Qt ${{ env.QT_VERSION }} for macOS ARM64
+          
+          **Build Configuration:** ${{ env.BUILD_TYPE }}
+          **Architecture:** ARM64 (Apple Silicon)
+          **Platform:** macOS 14+
+          
+          ## Installation
+          
+          1. Download and extract the tar.gz file:
+             ```bash
+             tar -xzf qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}.tar.gz
+             ```
+          
+          2. Set environment variables:
+             ```bash
+             export QTDIR="/path/to/extracted/qt"
+             export PATH="$QTDIR/bin:$PATH"
+             export CMAKE_PREFIX_PATH="$QTDIR:$CMAKE_PREFIX_PATH"
+             ```
+          
+          ## Verification
+          
+          ```bash
+          qmake -version
+          # Should show Qt ${{ env.QT_VERSION }}
+          
+          file $QTDIR/bin/qmake
+          # Should show: Mach-O 64-bit executable arm64
+          ```
+          
+          ## Usage with CMake
+          
+          ```cmake
+          find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+          qt_standard_project_setup()
+          qt_add_executable(myapp main.cpp)
+          target_link_libraries(myapp Qt6::Widgets)
+          ```
+          
+          ## SHA256 Checksum
+          
+          Verify the download integrity using the provided .sha256 file:
+          ```bash
+          shasum -a 256 -c qt-${{ env.QT_VERSION }}-macos-arm64-${{ env.BUILD_TYPE }}.tar.gz.sha256
+          ```
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
