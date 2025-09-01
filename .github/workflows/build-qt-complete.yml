@@ -78,11 +78,11 @@ jobs:
         
         # Create simple setup script
         cat > setup.sh << 'EOF'
-#!/bin/bash
-export QT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="$QT_DIR/bin:$PATH"
-export CMAKE_PREFIX_PATH="$QT_DIR"
-EOF
+        #!/bin/bash
+        export QT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        export PATH="$QT_DIR/bin:$PATH"
+        export CMAKE_PREFIX_PATH="$QT_DIR"
+        EOF
         chmod +x setup.sh
         
         # Strip debug symbols for release builds
