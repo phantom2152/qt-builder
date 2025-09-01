@@ -1,546 +1,101 @@
-# .github/workflows/build-qt-complete.yml
-name: Build Complete Qt 6.8.1 for macOS ARM64
+name: Build Qt 6.8.1 macOS ARM64
 
 on:
-  workflow_dispatch:  # Manual trigger only
+  workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build type (Release/Debug/RelWithDebInfo)'
+        description: 'Build type'
         required: true
         default: 'Release'
         type: choice
         options:
         - Release
         - Debug
-        - RelWithDebInfo
 
 env:
   QT_VERSION: "6.8.1"
-  CMAKE_VERSION: "3.28.0"  # Latest compatible with Qt 6.8
 
 jobs:
-  build-qt-complete:
-    runs-on: macos-14  # macOS Sonoma with Apple Silicon (M1)
-    timeout-minutes: 720  # 12 hours for complete build
+  build-qt:
+    runs-on: macos-14
+    timeout-minutes: 360
     
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Setup Xcode
-      uses: maxim-lobanov/setup-xcode@v1
-      with:
-        xcode-version: latest-stable
-    
-    - name: Install system dependencies
+    - name: Install dependencies
       run: |
-        # Update Homebrew and install all required dependencies
-        brew update
-        brew install \
-          ninja \
-          pv \
-          pkg-config \
-          python@3.11 \
-          node \
-          openssl@3 \
-          icu4c \
-          libpng \
-          jpeg-turbo \
-          webp \
-          freetype \
-          fontconfig \
-          harfbuzz \
-          pcre2 \
-          zlib \
-          zstd \
-          sqlite \
-          mysql \
-          postgresql@15 \
-          unixodbc \
-          gstreamer \
-          gst-plugins-base \
-          gst-plugins-good \
-          gst-plugins-bad \
-          gst-plugins-ugly \
-          ffmpeg \
-          dbus \
-          double-conversion \
-          md4c \
-          libb2
-        
-        # Install CMake (specific version for Qt 6.8)
-        if ! command -v cmake &> /dev/null || [[ $(cmake --version | head -n1 | cut -d' ' -f3) < "$CMAKE_VERSION" ]]; then
-          brew install cmake
-        fi
-        
-        # Ensure Python 3.11 is available
-        brew link --force python@3.11
-        
-        # Set environment variables for dependencies
-        echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig:/opt/homebrew/share/pkgconfig" >> $GITHUB_ENV
-        echo "LDFLAGS=-L/opt/homebrew/lib" >> $GITHUB_ENV
-        echo "CPPFLAGS=-I/opt/homebrew/include" >> $GITHUB_ENV
+        brew install ninja cmake openssl@3 icu4c
         echo "PATH=/opt/homebrew/bin:$PATH" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig" >> $GITHUB_ENV
     
     - name: Cache Qt source
       uses: actions/cache@v4
-      id: cache-qt-source
+      id: cache-source
       with:
-        path: qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz
+        path: qt-src
         key: qt-source-${{ env.QT_VERSION }}
     
     - name: Download Qt source
-      if: steps.cache-qt-source.outputs.cache-hit != 'true'
+      if: steps.cache-source.outputs.cache-hit != 'true'
       run: |
-        echo "Downloading Qt ${{ env.QT_VERSION }} source..."
-        curl -L -o qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz \
-          https://download.qt.io/official_releases/qt/6.8/${{ env.QT_VERSION }}/single/qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz
-        
-        # Verify download
-        if [[ ! -f qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz ]]; then
-          echo "Failed to download Qt source"
-          exit 1
-        fi
-        
-        echo "Qt source downloaded successfully ($(ls -lh qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz | awk '{print $5}'))"
-    
-    - name: Extract Qt source
-      run: |
-        echo "Extracting Qt source..."
-        pv qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz | tar -xJf -
-        ls -la qt-everywhere-src-${{ env.QT_VERSION }}/ | head -20
+        curl -L -o qt.tar.xz https://download.qt.io/official_releases/qt/6.8/${{ env.QT_VERSION }}/single/qt-everywhere-src-${{ env.QT_VERSION }}.tar.xz
+        tar -xf qt.tar.xz
+        mv qt-everywhere-src-${{ env.QT_VERSION }} qt-src
     
     - name: Cache Qt build
       uses: actions/cache@v4
-      id: cache-qt-build
+      id: cache-build
       with:
-        path: |
-          qt-build
-          qt-install
-        key: qt-complete-arm64-${{ env.QT_VERSION }}-${{ inputs.build_type }}-${{ runner.os }}-${{ hashFiles('qt-everywhere-src-*/configure.cmake', 'qt-everywhere-src-*/cmake/**/*') }}
-        restore-keys: |
-          qt-complete-arm64-${{ env.QT_VERSION }}-${{ inputs.build_type }}-${{ runner.os }}-
+        path: qt-install
+        key: qt-build-${{ env.QT_VERSION }}-${{ inputs.build_type }}-${{ hashFiles('qt-src/configure.cmake') }}
     
-    - name: Configure Qt (Complete Build)
-      if: steps.cache-qt-build.outputs.cache-hit != 'true'
+    - name: Build Qt
+      if: steps.cache-build.outputs.cache-hit != 'true'
       run: |
-        echo "Configuring Qt with all modules and features..."
         mkdir -p qt-build qt-install
         cd qt-build
         
-        # Get number of CPU cores for parallel build
-        NCPU=$(sysctl -n hw.ncpu)
-        echo "Building with $NCPU CPU cores"
-        
-        # Configure Qt with all features enabled
-        cmake ../qt-everywhere-src-${{ env.QT_VERSION }} \
+        cmake ../qt-src \
           -GNinja \
           -DCMAKE_INSTALL_PREFIX=../qt-install \
           -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
-          -DCMAKE_OSX_ARCHITECTURES="arm64" \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
           -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-          -DCMAKE_PREFIX_PATH="/opt/homebrew" \
-          -DCMAKE_FIND_ROOT_PATH="/opt/homebrew" \
-          -DQT_BUILD_EXAMPLES=ON \
+          -DCMAKE_PREFIX_PATH=/opt/homebrew \
+          -DQT_BUILD_EXAMPLES=OFF \
           -DQT_BUILD_TESTS=OFF \
-          -DBUILD_SHARED_LIBS=ON \
-          -DQT_FEATURE_framework=ON \
-          -DQT_FEATURE_shared=ON \
-          -DQT_FEATURE_static=OFF \
-          -DQT_FEATURE_pkg_config=ON \
-          -DQT_FEATURE_rpath=ON \
-          -DQT_FEATURE_relocatable=ON \
-          -DQT_FEATURE_reduce_exports=ON \
-          -DQT_FEATURE_reduce_relocations=OFF \
-          -DQT_FEATURE_separate_debug_info=ON \
-          -DQT_FEATURE_debug_and_release=OFF \
-          -DQT_FEATURE_appstore_compliant=OFF \
-          -DQT_FEATURE_thread=ON \
-          -DQT_FEATURE_concurrent=ON \
-          -DQT_FEATURE_dbus=ON \
-          -DQT_FEATURE_accessibility=ON \
-          -DQT_FEATURE_doubleconversion=ON \
-          -DQT_FEATURE_glib=ON \
-          -DQT_FEATURE_icu=ON \
-          -DQT_FEATURE_pcre2=ON \
-          -DQT_FEATURE_system_pcre2=ON \
-          -DQT_FEATURE_zlib=ON \
-          -DQT_FEATURE_system_zlib=ON \
-          -DQT_FEATURE_zstd=ON \
-          -DQT_FEATURE_ssl=ON \
-          -DQT_FEATURE_openssl=ON \
-          -DQT_FEATURE_openssl_linked=ON \
-          -DQT_FEATURE_schannel=OFF \
-          -DQT_FEATURE_securetransport=ON \
-          -DQT_FEATURE_libproxy=OFF \
-          -DQT_FEATURE_system_proxies=ON \
-          -DQT_FEATURE_cups=ON \
-          -DQT_FEATURE_fontconfig=ON \
-          -DQT_FEATURE_freetype=ON \
-          -DQT_FEATURE_system_freetype=ON \
-          -DQT_FEATURE_harfbuzz=ON \
-          -DQT_FEATURE_system_harfbuzz=ON \
-          -DQT_FEATURE_jpeg=ON \
-          -DQT_FEATURE_system_jpeg=ON \
-          -DQT_FEATURE_png=ON \
-          -DQT_FEATURE_system_png=ON \
-          -DQT_FEATURE_gif=ON \
-          -DQT_FEATURE_ico=ON \
-          -DQT_FEATURE_webp=ON \
-          -DQT_FEATURE_system_webp=ON \
-          -DQT_FEATURE_sqlite=ON \
-          -DQT_FEATURE_system_sqlite=ON \
-          -DQT_FEATURE_sql_db2=OFF \
-          -DQT_FEATURE_sql_ibase=OFF \
-          -DQT_FEATURE_sql_mysql=ON \
-          -DQT_FEATURE_sql_oci=OFF \
-          -DQT_FEATURE_sql_odbc=ON \
-          -DQT_FEATURE_sql_psql=ON \
-          -DQT_FEATURE_sql_sqlite=ON \
-          -DQT_FEATURE_testlib=ON \
-          -DQT_FEATURE_xml=ON \
-          -DQT_FEATURE_texthtmlparser=ON \
-          -DQT_FEATURE_cssparser=ON \
-          -DQT_FEATURE_textodfwriter=ON \
-          -DQT_FEATURE_textmarkdownreader=ON \
-          -DQT_FEATURE_textmarkdownwriter=ON \
-          -DQT_FEATURE_regularexpression=ON \
-          -DQT_FEATURE_sharedmemory=ON \
-          -DQT_FEATURE_systemsemaphore=ON \
-          -DQT_FEATURE_xmlstream=ON \
-          -DQT_FEATURE_xmlstreamreader=ON \
-          -DQT_FEATURE_xmlstreamwriter=ON \
-          -DQT_FEATURE_dom=ON \
-          -DQT_FEATURE_animation=ON \
-          -DQT_FEATURE_gestures=ON \
-          -DQT_FEATURE_sha3_fast=ON \
-          -DQT_FEATURE_gui=ON \
-          -DQT_FEATURE_widgets=ON \
-          -DQT_FEATURE_opengl=ON \
-          -DQT_FEATURE_opengles2=OFF \
-          -DQT_FEATURE_opengl_desktop=ON \
-          -DQT_FEATURE_vulkan=ON \
-          -DQT_FEATURE_metal=ON \
-          -DQT_FEATURE_rhi=ON \
-          -DQT_FEATURE_printsupport=ON \
-          -DQT_FEATURE_printer=ON \
-          -DQT_FEATURE_printdialog=ON \
-          -DQT_FEATURE_printpreviewwidget=ON \
-          -DQT_FEATURE_printpreviewdialog=ON \
-          -DQT_FEATURE_filedialog=ON \
-          -DQT_FEATURE_fontdialog=ON \
-          -DQT_FEATURE_colordialog=ON \
-          -DQT_FEATURE_messagebox=ON \
-          -DQT_FEATURE_progressdialog=ON \
-          -DQT_FEATURE_inputdialog=ON \
-          -DQT_FEATURE_errormessage=ON \
-          -DQT_FEATURE_wizard=ON \
-          -DQT_FEATURE_sizegrip=ON \
-          -DQT_FEATURE_calendarwidget=ON \
-          -DQT_FEATURE_qml=ON \
-          -DQT_FEATURE_qml_debug=ON \
-          -DQT_FEATURE_qml_network=ON \
-          -DQT_FEATURE_qml_preview=ON \
-          -DQT_FEATURE_qml_profiler=ON \
-          -DQT_FEATURE_qml_sequence_object=ON \
-          -DQT_FEATURE_qml_list_model=ON \
-          -DQT_FEATURE_qml_delegate_model=ON \
-          -DQT_FEATURE_qml_xml_http_request=ON \
-          -DQT_FEATURE_qml_locale=ON \
-          -DQT_FEATURE_quick=ON \
-          -DQT_FEATURE_quick_shadereffect=ON \
-          -DQT_FEATURE_quick_sprite=ON \
-          -DQT_FEATURE_quick_animatedimage=ON \
-          -DQT_FEATURE_quick_canvas=ON \
-          -DQT_FEATURE_quick_designer=ON \
-          -DQT_FEATURE_quick_flipable=ON \
-          -DQT_FEATURE_quick_gridview=ON \
-          -DQT_FEATURE_quick_listview=ON \
-          -DQT_FEATURE_quick_pathview=ON \
-          -DQT_FEATURE_quick_positioners=ON \
-          -DQT_FEATURE_quick_repeater=ON \
-          -DQT_FEATURE_quick_tableview=ON \
-          -DQT_FEATURE_quick_treeview=ON \
-          -DQT_FEATURE_quickcontrols2=ON \
-          -DQT_FEATURE_quicktemplates2=ON \
-          -DQT_FEATURE_multimedia=ON \
-          -DQT_FEATURE_spatialaudio=ON \
-          -DQT_FEATURE_camera=ON \
-          -DQT_FEATURE_ffmpeg=ON \
-          -DQT_FEATURE_gstreamer=ON \
-          -DQT_FEATURE_gstreamer_1_0=ON \
-          -DQT_FEATURE_gstreamer_app=ON \
-          -DQT_FEATURE_gstreamer_photography=ON \
-          -DQT_FEATURE_gstreamer_gl=ON \
-          -DQT_FEATURE_pulseaudio=OFF \
-          -DQT_FEATURE_alsa=OFF \
-          -DQT_FEATURE_network=ON \
-          -DQT_FEATURE_networkproxy=ON \
-          -DQT_FEATURE_networkinterface=ON \
-          -DQT_FEATURE_networkdiskcache=ON \
-          -DQT_FEATURE_bearer=OFF \
-          -DQT_FEATURE_localserver=ON \
-          -DQT_FEATURE_udpsocket=ON \
-          -DQT_FEATURE_networkauth=ON \
-          -DQT_FEATURE_http=ON \
-          -DQT_FEATURE_ftp=ON \
-          -DQT_FEATURE_socks5=ON \
-          -DQT_FEATURE_websockets=ON \
-          -DQT_FEATURE_websockets_secure=ON \
-          -DQT_FEATURE_location=ON \
-          -DQT_FEATURE_positioning=ON \
-          -DQT_FEATURE_sensors=ON \
-          -DQT_FEATURE_serialport=ON \
-          -DQT_FEATURE_serialbus=ON \
-          -DQT_FEATURE_bluetooth=ON \
-          -DQT_FEATURE_nfc=OFF \
-          -DQT_FEATURE_concurrent=ON \
-          -DQT_FEATURE_pdf=ON \
-          -DQT_FEATURE_svg=ON \
-          -DQT_FEATURE_svgrenderer=ON \
-          -DQT_FEATURE_svgwidgets=ON \
-          -DQT_FEATURE_charts=ON \
-          -DQT_FEATURE_datavisualization=ON \
-          -DQT_FEATURE_lottie=ON \
-          -DQT_FEATURE_scxml=ON \
-          -DQT_FEATURE_statemachine=ON \
           -DQT_FEATURE_webengine=OFF \
           -DQT_FEATURE_webenginecore=OFF \
           -DQT_FEATURE_webenginewidgets=OFF \
-          -DQT_FEATURE_webengineqml=OFF \
-          -DQT_FEATURE_webenginequick=OFF \
-          -DQT_FEATURE_webchannel=ON \
-          -DQT_FEATURE_websockets=ON \
-          -DQT_FEATURE_remoteobjects=ON \
-          -DQT_FEATURE_mqtt=ON \
-          -DQT_FEATURE_coap=ON \
-          -DQT_FEATURE_opcua=ON \
-          -DQT_FEATURE_serialbus=ON \
-          -DQT_FEATURE_virtualkeybord=ON \
-          -DQT_FEATURE_speech=ON \
-          -DQT_FEATURE_texttospeech=ON \
-          -DQT_FEATURE_imageformats=ON \
-          -DQT_FEATURE_style_fusion=ON \
-          -DQT_FEATURE_style_mac=ON \
-          -DQT_FEATURE_style_windows=OFF \
-          -DQT_FEATURE_style_android=OFF \
-          -DOpenSSL_ROOT_DIR="/opt/homebrew/opt/openssl@3" \
-          -DMYSQL_ROOT_DIR="/opt/homebrew/opt/mysql" \
-          -DPostgreSQL_ROOT_DIR="/opt/homebrew/opt/postgresql@15" \
-          -DGSTREAMER_ROOT_DIR="/opt/homebrew" \
-          -DICU_ROOT_DIR="/opt/homebrew/opt/icu4c" \
-          -DFREETYPE_LIBRARY="/opt/homebrew/lib/libfreetype.dylib" \
-          -DFREETYPE_INCLUDE_DIRS="/opt/homebrew/include/freetype2" \
-          -DPNG_LIBRARY="/opt/homebrew/lib/libpng.dylib" \
-          -DPNG_PNG_INCLUDE_DIR="/opt/homebrew/include" \
-          -DJPEG_LIBRARY="/opt/homebrew/lib/libjpeg.dylib" \
-          -DJPEG_INCLUDE_DIR="/opt/homebrew/include"
+          -DOpenSSL_ROOT_DIR=/opt/homebrew/opt/openssl@3 \
+          -DICU_ROOT_DIR=/opt/homebrew/opt/icu4c
         
-        echo "Configuration completed successfully"
-    
-    - name: Build Qt (Complete)
-      if: steps.cache-qt-build.outputs.cache-hit != 'true'
-      run: |
-        cd qt-build
-        echo "Starting Qt build..."
-        NCPU=$(sysctl -n hw.ncpu)
-        echo "Building with $NCPU parallel jobs"
-        
-        # Build with progress monitoring
-        ninja -j$NCPU -v
-        
-        echo "Build completed successfully"
-    
-    - name: Install Qt
-      if: steps.cache-qt-build.outputs.cache-hit != 'true'
-      run: |
-        cd qt-build
-        echo "Installing Qt..."
+        ninja -j$(sysctl -n hw.ncpu)
         ninja install
-        
-        # Verify installation
-        ls -la ../qt-install/
-        ls -la ../qt-install/bin/ | head -20
-        ls -la ../qt-install/lib/ | head -20
-        
-        echo "Installation completed successfully"
     
-    - name: Post-process installation
+    - name: Create package
       run: |
         cd qt-install
         
-        # Create version info
-        cat > VERSION_INFO.txt << EOF
-Qt Version: ${{ env.QT_VERSION }}
-Build Type: ${{ inputs.build_type }}
-Target Architecture: ARM64 (Apple Silicon)
-Built on: $(date -u)
-macOS Version: $(sw_vers -productVersion)
-Xcode Version: $(xcodebuild -version | head -n1)
-CMake Version: $(cmake --version | head -n1)
-Features: Complete build with all modules and dependencies
-Modules: Core, GUI, Widgets, QML, Quick, Multimedia, Network, SQL, SVG, Charts, PDF, and more
-Dependencies: OpenSSL, ICU, GStreamer, FFmpeg, MySQL, PostgreSQL, and system libraries
-EOF
-        
-        # Create environment setup script
-        cat > setup_environment.sh << 'EOF'
+        # Create simple setup script
+        cat > setup.sh << 'EOF'
 #!/bin/bash
-# Qt Environment Setup Script
 export QT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="$QT_DIR/bin:$PATH"
 export CMAKE_PREFIX_PATH="$QT_DIR"
-export QT_PLUGIN_PATH="$QT_DIR/plugins"
-export QML_IMPORT_PATH="$QT_DIR/qml"
-export QML2_IMPORT_PATH="$QT_DIR/qml"
-export DYLD_FRAMEWORK_PATH="$QT_DIR/lib:$DYLD_FRAMEWORK_PATH"
-echo "Qt ${{ env.QT_VERSION }} environment configured"
-echo "Qt Directory: $QT_DIR"
-echo "Use 'qmake --version' or 'cmake --find-package Qt6' to verify"
 EOF
-        chmod +x setup_environment.sh
+        chmod +x setup.sh
         
-        # Create CMake toolchain file
-        cat > qt6-config.cmake << EOF
-# Qt6 CMake Configuration
-set(Qt6_DIR "\${CMAKE_CURRENT_LIST_DIR}/lib/cmake/Qt6")
-set(CMAKE_PREFIX_PATH "\${CMAKE_CURRENT_LIST_DIR}" \${CMAKE_PREFIX_PATH})
-set(QT_QMAKE_EXECUTABLE "\${CMAKE_CURRENT_LIST_DIR}/bin/qmake")
-EOF
-        
-        # Remove debug info if Release build to save space
+        # Strip debug symbols for release builds
         if [[ "${{ inputs.build_type }}" == "Release" ]]; then
-          echo "Stripping debug symbols to reduce size..."
-          find . -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
           find ./lib -name "*.dylib" -exec strip -x {} \; 2>/dev/null || true
         fi
         
-        echo "Post-processing completed"
+        cd ..
+        tar -czf qt-${{ env.QT_VERSION }}-macos-arm64.tar.gz -C qt-install .
     
-    - name: Create comprehensive tarball
-      run: |
-        echo "Creating comprehensive Qt package..."
-        
-        # Create a detailed README
-        cat > qt-install/README.md << EOF
-# Qt ${{ env.QT_VERSION }} for macOS ARM64 (Apple Silicon)
-
-This is a complete Qt ${{ env.QT_VERSION }} build for macOS ARM64 with all major modules and dependencies included.
-
-## What's Included
-
-- **Qt Core Modules**: QtCore, QtGui, QtWidgets, QtNetwork, QtSql, QtXml, QtTest, QtConcurrent
-- **Qt Quick/QML**: QtQml, QtQuick, QtQuickControls2, QtQuickTemplates2, QtQuickWidgets
-- **Multimedia**: QtMultimedia, QtSpatialAudio (with FFmpeg and GStreamer backends)
-- **Graphics**: QtOpenGL, QtSvg, QtCharts, QtDataVisualization, QtPdf
-- **Connectivity**: QtWebSockets, QtWebChannel, QtMqtt, QtCoap, QtOpcUa, QtNetworkAuth
-- **System Integration**: QtDBus, QtPrintSupport, QtBluetooth, QtSerialPort, QtSerialBus
-- **Additional**: QtStateMachine, QtScxml, QtRemoteObjects, QtPositioning, QtSensors, QtTextToSpeech
-
-## Dependencies Included
-
-- OpenSSL 3.x for secure networking
-- ICU for internationalization
-- GStreamer for multimedia
-- FFmpeg for media codecs
-- MySQL and PostgreSQL client libraries
-- System libraries (zlib, png, jpeg, freetype, harfbuzz, etc.)
-
-## Installation
-
-1. Extract this archive to your desired location (e.g., /usr/local/Qt-${{ env.QT_VERSION }})
-2. Source the environment: \`source setup_environment.sh\`
-3. Verify: \`qmake --version\`
-
-## CMake Usage
-
-\`\`\`cmake
-set(CMAKE_PREFIX_PATH "/path/to/qt-install")
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
-target_link_libraries(your_target Qt6::Core Qt6::Widgets)
-\`\`\`
-
-## QMake Usage
-
-\`\`\`bash
-/path/to/qt-install/bin/qmake your_project.pro
-make
-\`\`\`
-
-Built on: $(date -u)
-Architecture: ARM64 only (Apple Silicon M1/M2/M3)
-Minimum macOS: 12.0 (Monterey)
-EOF
-        
-        # Create the tarball with compression
-        echo "Creating compressed archive..."
-        tar -czf qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz -C qt-install .
-        
-        # Create file info
-        FILESIZE=$(ls -lh qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz | awk '{print $5}')
-        echo "Package created: qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz ($FILESIZE)"
-        
-        # Create checksums
-        shasum -a 256 qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz > qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz.sha256
-        echo "SHA256 checksum created"
-    
-    - name: Upload Qt complete build artifact
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: qt-${{ env.QT_VERSION }}-macos-arm64-complete-${{ inputs.build_type }}
-        path: |
-          qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz
-          qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz.sha256
-        retention-days: 90
-        compression-level: 0  # Already compressed
-    
-    - name: Create GitHub Release
-      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: qt-${{ env.QT_VERSION }}-macos-arm64-complete-${{ inputs.build_type }}-${{ github.run_number }}
-        name: Qt ${{ env.QT_VERSION }} Complete Build for macOS ARM64 (${{ inputs.build_type }})
-        body: |
-          ## Qt ${{ env.QT_VERSION }} Complete Build for macOS ARM64
-          
-          **Build Configuration:**
-          - Architecture: ARM64 (Apple Silicon)
-          - Build Type: ${{ inputs.build_type }}
-          - Target: macOS 12.0+ (Monterey and later)
-          
-          **What's Included:**
-          - All major Qt modules and frameworks
-          - Complete development environment
-          - All dependencies and libraries
-          - CMake and QMake support
-          - Examples and documentation
-          
-          **Installation:**
-          1. Download `qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz`
-          2. Extract: `tar -xzf qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz -C /usr/local/qt6`
-          3. Setup environment: `source /usr/local/qt6/setup_environment.sh`
-          4. Verify: `qmake --version`
-          
-          **File Integrity:**
-          Verify download with SHA256: `shasum -a 256 -c qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz.sha256`
-          
-          Built on macOS ${{ runner.os }} with Xcode $(xcodebuild -version | head -n1 | cut -d' ' -f2)
-        files: |
-          qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz
-          qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz.sha256
-        draft: false
-        prerelease: ${{ inputs.build_type != 'Release' }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Build Summary
-      run: |
-        echo "## Qt Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Version**: Qt ${{ env.QT_VERSION }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Architecture**: ARM64 (Apple Silicon)" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Type**: ${{ inputs.build_type }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Package Size**: $(ls -lh qt-${{ env.QT_VERSION }}-macos-arm64-complete.tar.gz | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
-        echo "- **Modules**: Complete build with all major Qt modules" >> $GITHUB_STEP_SUMMARY
-        echo "- **Dependencies**: All system dependencies included" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "The complete Qt package is ready for download and can be used immediately in any macOS ARM64 project." >> $GITHUB_STEP_SUMMARY
+        name: qt-${{ env.QT_VERSION }}-macos-arm64-${{ inputs.build_type }}
+        path: qt-${{ env.QT_VERSION }}-macos-arm64.tar.gz
+        retention-days: 30
