@@ -42,7 +42,7 @@ jobs:
     
     - name: Extract Qt source
       run: |
-        tar -xf qt-everywhere-src-6.8.1.tar.xz
+        tar -xvf qt-everywhere-src-6.8.1.tar.xz
     
     - name: Cache Qt build
       uses: actions/cache@v4
