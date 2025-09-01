@@ -22,70 +22,77 @@ jobs:
         brew install ninja cmake
     
     - name: Cache Qt source
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-qt-source
       with:
-        path: qt-everywhere-src-6.9.2.tar.xz
-        key: qt-source-6.9.2
+        path: qt-everywhere-src-6.8.1.tar.xz
+        key: qt-source-6.8.1
     
     - name: Download Qt source
       if: steps.cache-qt-source.outputs.cache-hit != 'true'
       run: |
-        wget https://download.qt.io/official_releases/qt/6.9/6.9.2/single/qt-everywhere-src-6.9.2.tar.xz
+        curl -L -o qt-everywhere-src-6.8.1.tar.xz https://download.qt.io/official_releases/qt/6.8/6.8.1/single/qt-everywhere-src-6.8.1.tar.xz
     
     - name: Extract Qt source
       run: |
-        tar -xf qt-everywhere-src-6.9.2.tar.xz
+        tar -xf qt-everywhere-src-6.8.1.tar.xz
     
     - name: Cache Qt build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: cache-qt-build
       with:
-        path: qt-build
-        key: qt-build-macos-6.9.2-${{ runner.os }}-${{ hashFiles('qt-everywhere-src-6.9.2/configure') }}
+        path: |
+          qt-build
+          qt-install
+        key: qt-build-macos-6.8.1-${{ runner.os }}-${{ hashFiles('qt-everywhere-src-6.8.1/configure.cmake') }}
+        restore-keys: |
+          qt-build-macos-6.8.1-${{ runner.os }}-
     
     - name: Configure Qt
       if: steps.cache-qt-build.outputs.cache-hit != 'true'
       run: |
-        mkdir -p qt-build
+        mkdir -p qt-build qt-install
         cd qt-build
-        ../qt-everywhere-src-6.9.2/configure \
-          -prefix ../qt-install \
-          -opensource \
-          -confirm-license \
-          -nomake examples \
-          -nomake tests \
-          -static \
-          -release \
-          -skip qtwebengine \
-          -skip qt3d \
-          -skip qtquick3dphysics
+        cmake ../qt-everywhere-src-6.8.1 \
+          -GNinja \
+          -DCMAKE_INSTALL_PREFIX=../qt-install \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DQT_BUILD_EXAMPLES=OFF \
+          -DQT_BUILD_TESTS=OFF \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DQT_FEATURE_webengine=OFF \
+          -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
     
     - name: Build Qt
       if: steps.cache-qt-build.outputs.cache-hit != 'true'
       run: |
         cd qt-build
-        make -j$(sysctl -n hw.ncpu)
-        make install
+        ninja -j$(sysctl -n hw.ncpu)
+    
+    - name: Install Qt
+      if: steps.cache-qt-build.outputs.cache-hit != 'true'
+      run: |
+        cd qt-build
+        ninja install
     
     - name: Create tarball
       run: |
-        tar -czf qt-6.9.2-macos.tar.gz -C qt-install .
+        tar -czf qt-6.8.1-macos-universal.tar.gz -C qt-install .
     
     - name: Upload Qt build artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: qt-6.9.2-macos
-        path: qt-6.9.2-macos.tar.gz
+        name: qt-6.8.1-macos-universal
+        path: qt-6.8.1-macos-universal.tar.gz
         retention-days: 90
     
     - name: Create release (optional)
       if: github.ref == 'refs/heads/main'
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: qt-6.9.2-macos
-        name: Qt 6.9.2 for macOS
-        files: qt-6.9.2-macos.tar.gz
+        tag_name: qt-6.8.1-macos-universal
+        name: Qt 6.8.1 for macOS Universal
+        files: qt-6.8.1-macos-universal.tar.gz
         draft: false
         prerelease: false
       env:
