@@ -19,7 +19,14 @@ jobs:
     
     - name: Install dependencies
       run: |
-        brew install ninja cmake
+        brew install ninja
+        # Check if cmake is already installed, if not install it
+        if ! command -v cmake &> /dev/null; then
+          brew install cmake
+        else
+          echo "cmake is already available at $(which cmake)"
+          cmake --version
+        fi
     
     - name: Cache Qt source
       uses: actions/cache@v4
