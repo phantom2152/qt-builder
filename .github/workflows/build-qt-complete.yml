@@ -63,13 +63,15 @@ jobs:
           ls -la "$SRC_DIR"
 
       - name: Configure Qt (CMake via ./configure)
-        working-directory: ${{ env.SRC_DIR }}
+        working-directory: ${{ env.BUILD_DIR }}
         env:
           # Ensure arm64 build
           CMAKE_OSX_ARCHITECTURES: ${{ env.ARCH }}
         run: |
           set -euxo pipefail
           mkdir -p "$BUILD_DIR"
+          cd "$BUILD_DIR"
+          
           # Flags to reduce size and skip things:
           # -nomake examples -nomake tests skips building examples/tests
           # -skip qtwebengine and other heavy modules are often skipped; adjust as needed
@@ -112,10 +114,12 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES}"
             -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR:-}"
+            -GNinja
           )
 
           # Run configure (Qt 6 configure is a wrapper around CMake)
-          ./configure \
+          # Configure from BUILD_DIR, pointing to SRC_DIR
+          "${SRC_DIR}/configure" \
             "${base_flags[@]}" \
             ${extra_arr+"${extra_arr[@]}"} \
             -- \
@@ -125,13 +129,23 @@ jobs:
         working-directory: ${{ env.BUILD_DIR }}
         run: |
           set -euxo pipefail
-          cmake --build . --parallel
+          # Use ninja if available (faster), otherwise cmake --build
+          if command -v ninja >/dev/null 2>&1; then
+            ninja
+          else
+            cmake --build . --parallel
+          fi
 
       - name: Install
         working-directory: ${{ env.BUILD_DIR }}
         run: |
           set -euxo pipefail
-          cmake --install .
+          # Use ninja if available, otherwise cmake --install
+          if command -v ninja >/dev/null 2>&1; then
+            ninja install
+          else
+            cmake --install .
+          fi
 
       - name: Create tarball
         run: |
