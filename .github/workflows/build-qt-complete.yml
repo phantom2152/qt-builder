@@ -96,14 +96,6 @@ jobs:
               -skip qtwebengine
               -skip qtpdf
               -skip qtwebview
-              -skip qtserialbus
-              -skip qtserialport
-              -skip qtcharts
-              -skip qtpositioning
-              -skip qtlocation
-              -skip qt3d
-              -skip qtmultimedia
-              -skip qtconnectivity
             )
           fi
 
