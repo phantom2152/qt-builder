@@ -108,11 +108,10 @@ jobs:
 
           # Extra user-provided args
           extra="${{ github.event.inputs.configure_extra }}"
+          declare -a extra_arr=()
           if [ -n "$extra" ]; then
             # Split shell words
             read -r -a extra_arr <<< "$extra"
-          else
-            extra_arr=()
           fi
 
           # Forward additional CMake args after --
@@ -125,7 +124,7 @@ jobs:
           # Run configure (Qt 6 configure is a wrapper around CMake)
           ./configure \
             "${base_flags[@]}" \
-            "${extra_arr[@]}" \
+            ${extra_arr+"${extra_arr[@]}"} \
             -- \
             "${cmake_inject_args[@]}"
 
