@@ -42,7 +42,7 @@ jobs:
       - name: Install tools via Homebrew
         run: |
           brew update
-          brew install cmake ninja coreutils gnu-tar || true
+          brew install ninja coreutils gnu-tar || true
           # Optional: dependencies commonly needed by some Qt modules
           brew install pkg-config openssl@3 bison flex gperf node python@3.12 || true
           echo "HOMEBREW_PREFIX=$(brew --prefix)" >> $GITHUB_ENV
