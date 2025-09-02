@@ -16,6 +16,9 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14  # Apple Silicon (arm64)
