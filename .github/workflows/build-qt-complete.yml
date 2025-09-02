@@ -48,17 +48,22 @@ jobs:
           echo "HOMEBREW_PREFIX=$(brew --prefix)" >> $GITHUB_ENV
           echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
 
-      - name: Prepare source
+      - name: Prepare directories
         run: |
           set -euxo pipefail
           mkdir -p "$SRC_DIR"
+          mkdir -p "$BUILD_DIR"
+          mkdir -p "$INSTALL_PREFIX"
+
+      - name: Download and extract Qt source
+        run: |
+          set -euxo pipefail
           version="${{ github.event.inputs.qt_version }}"
           # Download the "qt-everywhere" source tarball for the version
           # Example filename: qt-everywhere-src-6.9.2.tar.xz
           url="https://download.qt.io/official_releases/qt/${version%.*}/${version}/single/qt-everywhere-src-${version}.tar.xz"
           echo "Downloading: $url"
           curl -fL "$url" -o "$GITHUB_WORKSPACE/qt-src.tar.xz"
-          mkdir -p "$SRC_DIR"
           tar -xJf "$GITHUB_WORKSPACE/qt-src.tar.xz" -C "$SRC_DIR" --strip-components=1
           ls -la "$SRC_DIR"
 
@@ -69,8 +74,6 @@ jobs:
           CMAKE_OSX_ARCHITECTURES: ${{ env.ARCH }}
         run: |
           set -euxo pipefail
-          mkdir -p "$BUILD_DIR"
-          cd "$BUILD_DIR"
           
           # Flags to reduce size and skip things:
           # -nomake examples -nomake tests skips building examples/tests
